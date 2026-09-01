@@ -1,0 +1,16 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Render reads this on "New > Blueprint" and provisions the service for you.
+services:
+  - type: web
+    name: code-doc-generator
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      # How long generated reports stay downloadable (seconds).
+      - key: SESSION_TTL_SECONDS
+        value: "3600"
+      # FLASK_DEBUG is deliberately NOT set. Enabling it exposes the Werkzeug
+      # debugger, which is a remote Python console for anyone with the URL.
