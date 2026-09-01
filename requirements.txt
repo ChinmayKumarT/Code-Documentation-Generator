@@ -1,6 +1,9 @@
-transformers>=4.30.0
-torch>=1.10.0
 radon>=5.1.0
-tqdm>=4.65.0
 reportlab==4.2.5
 Flask>=2.0.0
+gunicorn>=21.2.0
+
+# The CodeT5 summarizer in analyzer/summarizer.py is not used by the app.
+# To re-enable it, reinstate these and read the Readme first:
+#   transformers>=4.30.0,<5
+#   torch>=1.10.0

@@ -255,6 +255,14 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         
+        // Cancel a pending hide, otherwise a report that finishes within
+        // 300ms of a tab switch is displayed and then immediately hidden
+        // by the stale timeout below.
+        if (hideResultsTimer) {
+            clearTimeout(hideResultsTimer);
+            hideResultsTimer = null;
+        }
+
         // Show the results section with animation
         resultsSection.style.display = 'block';
         // Force reflow to enable the transition
@@ -267,10 +275,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 100);
     }
 
+    let hideResultsTimer = null;
+
     function hideResults() {
         resultsSection.classList.remove('visible');
-        setTimeout(() => {
+        if (hideResultsTimer) {
+            clearTimeout(hideResultsTimer);
+        }
+        hideResultsTimer = setTimeout(() => {
             resultsSection.style.display = 'none';
+            hideResultsTimer = null;
         }, 300);
     }
     

@@ -5,7 +5,8 @@ import os
 import random
 from analyzer.code_parser import parse_code
 from analyzer.complexity import analyze_complexity
-from analyzer.summarizer import CodeSummarizer
+# NOTE: analyzer.summarizer (CodeT5) is intentionally not imported here — it
+# pulls in torch/transformers (~600MB) and its output was always discarded.
 
 # ReportLab for PDF
 from reportlab.lib.pagesizes import letter
@@ -643,7 +644,11 @@ def save_markdown(report: dict, md_path: str = "outputs/report.md") -> None:
     lines.append("## Complexity Information")
     for c in report["complexity_info"].get("cyclomatic_complexity", []):
         lines.append(f"- {c['name']}: {map_complexity_to_big_o(c['complexity'])}")
-    lines.append(f"- Maintainability Index: {report['complexity_info']['maintainability_index']:.2f}")
+    mi = report["complexity_info"].get("maintainability_index")
+    if mi is None:
+        lines.append("- Maintainability Index: not available")
+    else:
+        lines.append(f"- Maintainability Index: {mi:.2f}")
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -651,14 +656,17 @@ def save_markdown(report: dict, md_path: str = "outputs/report.md") -> None:
 
 # -------- Main -------- #
 
-def generate_report(code: str, output_dir: str = "outputs") -> dict:
+def generate_report(code: str, output_dir: str = "outputs", display_name: str = None) -> dict:
     """
-    Generate a code documentation report for the given code.
-    
+    Generate a code documentation report for the given source file.
+
     Args:
-        code: The source code
+        code: Path to the source code file
         output_dir: Directory to save the output files
-        
+        display_name: Name to show as the report title. Defaults to the
+            file's basename; callers that write to a temporary file should
+            pass the name the user knows it by.
+
     Returns:
         Dictionary containing the complete report
     """
@@ -679,22 +687,21 @@ def generate_report(code: str, output_dir: str = "outputs") -> dict:
         # Initialize samples as empty - we're disabling sample I/O execution
         samples = {}
         
-        # For Python files, always use build_paragraph for the summary
-        if code.lower().startswith('python'):
-            summary_text = build_paragraph(parsed_info)
-        else:
-            # For other languages, try AI summary first
-            summarizer = CodeSummarizer()
-            summary_text = summarizer.summarize_code(code)
-            if is_bad_summary(summary_text, parsed_info):
-                summary_text = build_paragraph(parsed_info)
-        
+        # Summaries are built from the parsed structure.
+        #
+        # The CodeT5 summarizer (analyzer/summarizer.py) is deliberately not
+        # used: its output never passed is_bad_summary(), so build_paragraph()
+        # produced every summary anyway while torch + the 232MB checkpoint cost
+        # ~30s per request. See Readme "AI summarizer" before re-enabling.
+        summary_text = build_paragraph(parsed_info)
+
+
         # Format the summary
         formatted_summary = format_summary(summary_text, parsed_info, complexity_info, samples)
         
         # Build the report
         report = {
-            "file": "code",
+            "file": display_name or os.path.basename(code),
             "summary": formatted_summary,
             "parsed_info": parsed_info,
             "complexity_info": complexity_info,

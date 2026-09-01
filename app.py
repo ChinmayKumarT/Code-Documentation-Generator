@@ -1,5 +1,7 @@
 import os
+import shutil
 import tempfile
+import time
 import uuid
 # Fix protobuf compatibility issue
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
@@ -19,25 +21,43 @@ os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
 
 # Allowed file extensions
+# Keep in sync with the parsers registered in analyzer.code_parser.get_parser
 ALLOWED_EXTENSIONS = {
     'py': 'python',
     'js': 'javascript',
+    'ts': 'typescript',
     'java': 'java',
     'c': 'c',
     'h': 'c',
     'cpp': 'cpp',
-    'hpp': 'cpp',
-    'cs': 'csharp',
-    'php': 'php',
-    'rb': 'ruby',
-    'go': 'go',
-    'rs': 'rust',
-    'swift': 'swift'
+    'cc': 'cpp',
+    'hpp': 'cpp'
 }
 
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Generated reports stay on disk so the browser can download them. Nothing
+# else removes them, so sweep old sessions before creating a new one.
+SESSION_TTL_SECONDS = int(os.environ.get('SESSION_TTL_SECONDS', 3600))
+
+def cleanup_old_sessions():
+    """Delete report directories older than SESSION_TTL_SECONDS."""
+    root = app.config['TEMP_FOLDER']
+    cutoff = time.time() - SESSION_TTL_SECONDS
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return
+    for name in entries:
+        path = os.path.join(root, name)
+        try:
+            if os.path.isdir(path) and os.path.getmtime(path) < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            # A sweep failure must never break the request that triggered it
+            pass
 
 @app.route('/favicon.ico')
 def favicon():
@@ -78,6 +98,8 @@ def handle_file_upload():
         return jsonify({'error': 'File type not supported'}), 400
     
     try:
+        cleanup_old_sessions()
+
         # Create a unique ID for this session
         session_id = str(uuid.uuid4())
         base_filename = os.path.splitext(secure_filename(file.filename))[0]
@@ -93,8 +115,9 @@ def handle_file_upload():
         file.save(filepath)
         
         # Generate reports in the temp directory
-        generate_report(filepath, output_dir=temp_dir)
-        
+        generate_report(filepath, output_dir=temp_dir,
+                        display_name=secure_filename(file.filename))
+
         # Prepare response with download links
         response_files = {}
         for ext in ['json', 'pdf', 'md']:
@@ -103,25 +126,28 @@ def handle_file_upload():
                 # Create a more descriptive filename
                 dest_filename = f"{base_filename}_report.{ext}"
                 dest_path = os.path.join(temp_dir, dest_filename)
-                
+
                 # Remove destination if it exists
                 if os.path.exists(dest_path):
                     os.unlink(dest_path)
-                
+
                 # Rename the file
                 os.rename(source, dest_path)
-                
+
                 # Add to response with session ID in the URL
                 response_files[ext] = {
                     'url': f"/download/{session_id}/{dest_filename}",
                     'filename': dest_filename
                 }
-        
+
         return jsonify({
             'message': 'Report generated successfully',
             'files': response_files
         })
-        
+
+    except (ValueError, SyntaxError) as e:
+        # Bad input, not a server fault
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -146,6 +172,8 @@ def handle_code_paste():
     filename = f"code{file_extension}"
     
     try:
+        cleanup_old_sessions()
+
         # Create a unique ID for this session
         session_id = str(uuid.uuid4())
         base_filename = f"code_{language}"  # More descriptive base name
@@ -162,8 +190,8 @@ def handle_code_paste():
             f.write(code)
         
         # Generate reports in the temp directory
-        generate_report(filepath, output_dir=temp_dir)
-        
+        generate_report(filepath, output_dir=temp_dir, display_name=filename)
+
         # Prepare response with download links
         response_files = {}
         for ext in ['json', 'pdf', 'md']:
@@ -191,6 +219,9 @@ def handle_code_paste():
             'files': response_files
         })
         
+    except (ValueError, SyntaxError) as e:
+        # Bad input, not a server fault
+        return jsonify({'error': f'Error processing code: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Error processing code: {str(e)}'}), 500
 
@@ -202,4 +233,10 @@ def download_file(session_id, filename):
     return send_from_directory(temp_dir, filename, as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
-    app.run(debug=True, extra_files=[], use_reloader=False)
+    # Local development only. In production the app is served by gunicorn
+    # (see Dockerfile / Procfile) and this block never runs.
+    # FLASK_DEBUG=1 enables the Werkzeug debugger, which grants a remote
+    # Python console — never set it on a public host.
+    debug = os.environ.get('FLASK_DEBUG') == '1'
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)

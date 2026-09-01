@@ -244,6 +244,6 @@ def parse_code(filepath: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     parser = get_parser(filepath)
     if not parser:
-        raise ValueError(f"Unsupported file type: {filepath}")
+        raise ValueError(f"Unsupported file type: {os.path.basename(filepath)}")
     
     return parser.parse(filepath)
