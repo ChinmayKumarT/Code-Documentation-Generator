@@ -1,0 +1,8 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+codet5-small/
+temp/
+outputs/
+uploads/
